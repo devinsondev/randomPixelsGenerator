@@ -35,31 +35,46 @@ def run_generator_worker(
     output_queue: Queue,
     stop_event: Event,
 ) -> None:
-    """Generate, analyze and record frames inside one child process."""
+    """Generate, analyze and optionally record frames inside one child process."""
     config = initial_config.validated()
     pipeline = AnalysisPipeline()
     tracker = RunningPercentileThreshold(
         warmup_frames=config.threshold_warmup
     )
     store = CandidateStore(session_dir / "candidates", worker_id)
-    logger = FrameLogger(
-        session_dir / "workers" / f"worker_{worker_id:02d}.sqlite3",
+    stats = SessionStats()
+
+    logger, last_error = _open_logger_if_enabled(
+        enabled=config.sqlite_logging,
+        session_dir=session_dir,
         worker_id=worker_id,
         worker_seed=worker_seed,
     )
-    stats = SessionStats()
+    sqlite_setting = config.sqlite_logging
 
     frame_index = 0
     started_at = time.perf_counter()
     last_publish_at = 0.0
-    last_error: str | None = None
-    logging_enabled = True
     previous_shape = (config.width, config.height)
 
     try:
         while not stop_event.is_set():
             loop_started = time.perf_counter()
             config = _latest_config(command_queue, config)
+
+            if config.sqlite_logging != sqlite_setting:
+                logger, toggle_error = _apply_sqlite_setting(
+                    logger=logger,
+                    enabled=config.sqlite_logging,
+                    session_dir=session_dir,
+                    worker_id=worker_id,
+                    worker_seed=worker_seed,
+                )
+                sqlite_setting = config.sqlite_logging
+                if toggle_error is not None:
+                    last_error = toggle_error
+                elif not config.sqlite_logging:
+                    last_error = None
 
             current_shape = (config.width, config.height)
             if (
@@ -86,10 +101,10 @@ def run_generator_worker(
             analysis = pipeline.analyze(pixels)
             tracker.observe(analysis.mvp.score)
 
-            save_error = _record_analysis(
+            record_error = _record_analysis(
                 stats=stats,
                 store=store,
-                logger=logger if logging_enabled else None,
+                logger=logger,
                 worker_seed=worker_seed,
                 frame_seed=frame_seed,
                 frame_index=frame_index,
@@ -99,10 +114,10 @@ def run_generator_worker(
                 threshold_mode=threshold_mode,
                 top_percent=config.top_percent,
             )
-            if save_error is not None:
-                last_error = save_error
-                if save_error.startswith("SQLite:"):
-                    logging_enabled = False
+            if record_error is not None:
+                last_error = record_error
+                if record_error.startswith("SQLite:"):
+                    logger = _close_logger(logger)
 
             now = time.perf_counter()
             should_publish = (
@@ -122,6 +137,7 @@ def run_generator_worker(
                         tracker=tracker,
                         threshold_mode=threshold_mode,
                         elapsed=max(now - started_at, 1e-9),
+                        sqlite_active=logger is not None,
                         error=last_error,
                     ),
                 )
@@ -132,10 +148,63 @@ def run_generator_worker(
             if remaining > 0:
                 stop_event.wait(remaining)
     finally:
-        try:
-            logger.close()
-        except sqlite3.Error:
-            pass
+        _close_logger(logger)
+
+
+def _open_logger_if_enabled(
+    *,
+    enabled: bool,
+    session_dir: Path,
+    worker_id: int,
+    worker_seed: int,
+) -> tuple[FrameLogger | None, str | None]:
+    if not enabled:
+        return None, None
+
+    try:
+        logger = FrameLogger(
+            session_dir / "workers" / f"worker_{worker_id:02d}.sqlite3",
+            worker_id=worker_id,
+            worker_seed=worker_seed,
+        )
+        return logger, None
+    except sqlite3.Error as error:
+        return None, f"SQLite: {error}"
+
+
+def _apply_sqlite_setting(
+    *,
+    logger: FrameLogger | None,
+    enabled: bool,
+    session_dir: Path,
+    worker_id: int,
+    worker_seed: int,
+) -> tuple[FrameLogger | None, str | None]:
+    if not enabled:
+        _close_logger(logger)
+        return None, None
+
+    if logger is not None:
+        return logger, None
+
+    return _open_logger_if_enabled(
+        enabled=True,
+        session_dir=session_dir,
+        worker_id=worker_id,
+        worker_seed=worker_seed,
+    )
+
+
+def _close_logger(logger: FrameLogger | None) -> None:
+    if logger is None:
+        return None
+
+    try:
+        logger.close()
+    except sqlite3.Error:
+        pass
+
+    return None
 
 
 def _effective_threshold(
@@ -222,6 +291,7 @@ def _build_snapshot(
     tracker: RunningPercentileThreshold,
     threshold_mode: str,
     elapsed: float,
+    sqlite_active: bool,
     error: str | None,
 ) -> WorkerSnapshot:
     maximum = stats.mvp.maximum
@@ -256,6 +326,7 @@ def _build_snapshot(
         robust_candidates=stats.robust_candidates,
         saved_mvp=stats.saved_mvp,
         saved_robust=stats.saved_robust,
+        sqlite_logging=sqlite_active,
         top_scores=tuple(
             (item.frame_index, item.score)
             for item in stats.mvp.top
