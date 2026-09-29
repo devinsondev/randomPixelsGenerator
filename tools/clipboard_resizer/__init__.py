@@ -1,0 +1,1 @@
+"""Clipboard image resizing utility."""
