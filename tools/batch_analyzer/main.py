@@ -156,7 +156,7 @@ class BatchAnalyzerWindow(QMainWindow):
             QMessageBox.warning(self, "Настройки", str(error))
             return
 
-        self.table.clear_results()
+        self.table.begin_batch()
         self.progress.setRange(0, 0)
         self.summary_label.setText("Сводка: считается...")
         self.status_label.setText("Поиск изображений...")
@@ -208,6 +208,7 @@ class BatchAnalyzerWindow(QMainWindow):
         )
 
     def _on_completed(self, summary: BatchSummary) -> None:
+        self.table.end_batch()
         state = "ОТМЕНЕНО" if summary.cancelled else "ГОТОВО"
         self.status_label.setText(
             f"{state}: найдено {summary.discovered:,}, "
@@ -217,6 +218,7 @@ class BatchAnalyzerWindow(QMainWindow):
         self.summary_label.setText(_format_summary(summary))
 
     def _on_fatal_error(self, message: str) -> None:
+        self.table.end_batch()
         self.status_label.setText(f"Ошибка: {message}")
         QMessageBox.critical(self, "Batch analyzer", message)
 
