@@ -117,3 +117,26 @@ only on anomalous candidates, and reserve any future VLM calls for the tiny tail
   process x BLAS-thread oversubscription.
 - Candidate paths must be worker-specific so simultaneous workers cannot overwrite
   each other's output.
+
+
+## Experiment integrity rules
+
+- Every generated frame must have a deterministic frame_seed derived from the
+  persisted worker_seed and frame_id. Do not change the derivation algorithm
+  silently; treat it as experiment format.
+- Every analyzed frame must be logged to the worker SQLite database. Candidate
+  images are a convenience subset, never the source of truth for statistics.
+- Keep one SQLite database per worker and batch writes. Do not make 16 workers
+  contend on one SQLite writer.
+- Candidate PNG files require JSON sidecars containing seeds, frame_id, dimensions,
+  analyzer scores, thresholds, all metric values, and an RGB pixel hash.
+- Maintain separate MVP and Robust candidate directories. Robust passes may exist
+  in both stages intentionally.
+- Percentile thresholds must be based only on prior observations for the current
+  frame size. Reset calibration when dimensions or warmup policy changes.
+- During percentile warmup use the configured fixed threshold; never pretend the
+  percentile estimate is calibrated before the minimum sample count.
+- CSV is an offline export format. Do not add per-frame live CSV writes to the hot
+  path when the SQLite journal already contains the data.
+- Runtime errors that disable SQLite logging must be visible in the worker UI;
+  never silently continue while claiming the experiment is fully recorded.
