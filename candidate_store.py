@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -121,6 +122,9 @@ class CandidateStore:
             "frame_id": int(frame_index),
             "width": int(image.shape[1]),
             "height": int(image.shape[0]),
+            "pixel_sha256": hashlib.sha256(
+                np.ascontiguousarray(image).tobytes(order="C")
+            ).hexdigest(),
             "saved_utc": datetime.now(timezone.utc).isoformat(),
             "mvp": _analysis_payload(analysis.mvp),
             "robust": (
