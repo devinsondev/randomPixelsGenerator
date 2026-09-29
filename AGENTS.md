@@ -98,3 +98,22 @@ random RGB image
 
 This ordering is intentional: reject obvious white noise cheaply, spend more CPU
 only on anomalous candidates, and reserve any future VLM calls for the tiny tail.
+
+
+## Multiprocessing rules
+
+- CPU-bound generation and analysis use processes, not Python threads.
+- Maximum interactive worker count is 16 unless a benchmark justifies changing it.
+- Every worker owns its RNG, AnalysisPipeline, SessionStats, and candidate directory.
+- Workers never touch Qt objects. Only the main process owns PySide6 widgets.
+- IPC queues must be bounded. Prefer dropping stale preview snapshots over blocking
+  a generator worker.
+- Generation speed and UI refresh speed are separate concerns. Publish previews at
+  a human-visible rate; never ship every generated frame through IPC.
+- Runtime settings are distributed as immutable WorkerConfig values.
+- On Windows the application must remain safe with multiprocessing spawn and
+  freeze_support(); never put process-spawning side effects at import time.
+- Numerical libraries inside each worker should stay single-threaded to avoid
+  process x BLAS-thread oversubscription.
+- Candidate paths must be worker-specific so simultaneous workers cannot overwrite
+  each other's output.
