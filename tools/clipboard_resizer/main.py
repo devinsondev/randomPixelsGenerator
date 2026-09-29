@@ -21,6 +21,11 @@ from PySide6.QtWidgets import (
 )
 
 from resizer import ResizeFilter, ResizeMode, resize_image
+from sanity_check import (
+    SanityChecker,
+    format_original_metrics,
+    format_sample,
+)
 
 
 class ClipboardResizerWindow(QMainWindow):
@@ -32,6 +37,7 @@ class ClipboardResizerWindow(QMainWindow):
 
         self.source_image: QImage | None = None
         self.output_image: QImage | None = None
+        self.sanity_checker = SanityChecker()
 
         self.width_spin = QSpinBox()
         self.width_spin.setRange(1, 8192)
@@ -67,6 +73,20 @@ class ClipboardResizerWindow(QMainWindow):
         self.save_button.clicked.connect(self.save_output)
         self.save_button.setEnabled(False)
 
+        self.sanity_button = QPushButton("Sanity check: MVP + Robust")
+        self.sanity_button.clicked.connect(self.run_sanity_check)
+        self.sanity_button.setEnabled(False)
+
+        self.sanity_summary = QLabel(
+            "Sanity check: вставь картинку, уменьши и нажми кнопку."
+        )
+        self.sanity_summary.setWordWrap(True)
+
+        self.sanity_details = QLabel(
+            "Будут сравнены: изображение / shuffled-пиксели / чистый random."
+        )
+        self.sanity_details.setWordWrap(True)
+
         self.source_info = QLabel("Исходник: —")
         self.output_info = QLabel("Результат: —")
 
@@ -84,6 +104,7 @@ class ClipboardResizerWindow(QMainWindow):
         buttons.addWidget(self.resize_button)
         buttons.addWidget(self.copy_button)
         buttons.addWidget(self.save_button)
+        buttons.addWidget(self.sanity_button)
 
         previews = QHBoxLayout()
 
@@ -101,6 +122,8 @@ class ClipboardResizerWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.addLayout(form)
         layout.addLayout(buttons)
+        layout.addWidget(self.sanity_summary)
+        layout.addWidget(self.sanity_details)
         layout.addLayout(previews, 1)
 
         root = QWidget()
@@ -163,11 +186,51 @@ class ClipboardResizerWindow(QMainWindow):
         )
         self.copy_button.setEnabled(True)
         self.save_button.setEnabled(True)
+        self.sanity_button.setEnabled(True)
+        self.sanity_summary.setText("Sanity check: результат изменён, нажми кнопку.")
+        self.sanity_details.setText(
+            "Будут сравнены: изображение / shuffled-пиксели / чистый random."
+        )
         self._render_output()
 
     def _resize_if_loaded(self, *_args) -> None:
         if self.source_image is not None:
             self.resize_current()
+
+    def run_sanity_check(self) -> None:
+        if self.output_image is None:
+            return
+
+        self.sanity_button.setEnabled(False)
+        self.sanity_button.setText("Анализ...")
+        QApplication.processEvents()
+
+        try:
+            result = self.sanity_checker.analyze(self.output_image)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Ошибка sanity check",
+                str(error),
+            )
+            return
+        finally:
+            self.sanity_button.setEnabled(True)
+            self.sanity_button.setText("Sanity check: MVP + Robust")
+
+        self.sanity_summary.setText(
+            " | ".join(
+                (
+                    format_sample(result.original),
+                    format_sample(result.shuffled),
+                    format_sample(result.random),
+                )
+            )
+        )
+        self.sanity_details.setText(
+            format_original_metrics(result.original)
+            + " | Это одиночный sanity-check, не статистический batch-тест."
+        )
 
     def copy_output(self) -> None:
         if self.output_image is None:
