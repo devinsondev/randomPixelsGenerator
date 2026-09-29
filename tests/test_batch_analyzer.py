@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtGui import QImage
+from image_io import save_rgb_png
 
 from tools.batch_analyzer.engine import BatchImageAnalyzer, discover_images
 from tools.batch_analyzer.models import BatchConfig
@@ -11,17 +11,8 @@ from tools.clipboard_resizer.resizer import ResizeFilter, ResizeMode
 
 
 def save_rgb(path: Path, rgb: np.ndarray) -> None:
-    height, width, _ = rgb.shape
-    raw = np.ascontiguousarray(rgb).tobytes(order="C")
-    image = QImage(
-        raw,
-        width,
-        height,
-        width * 3,
-        QImage.Format_RGB888,
-    ).copy()
-    if not image.save(str(path), "PNG"):
-        raise RuntimeError("Could not save test image.")
+    save_rgb_png(np.ascontiguousarray(rgb, dtype=np.uint8), path)
+
 
 
 class BatchAnalyzerTests(unittest.TestCase):
