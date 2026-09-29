@@ -48,6 +48,7 @@ class WorkerSnapshot:
     threshold_mode: str
     top_percent: float
     percentile_samples: int
+    threshold_warmup: int
     mvp_passed: int
     robust_score: float | None
     robust_threshold: float | None
