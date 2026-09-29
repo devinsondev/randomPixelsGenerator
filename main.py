@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from analysis_pipeline import AnalysisPipeline, PipelineResult
+
 
 class RandomImageGenerator(QMainWindow):
     def __init__(self):
@@ -30,15 +32,18 @@ class RandomImageGenerator(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.generate_image)
 
+        self.analysis_pipeline = AnalysisPipeline()
         self.current_image: QImage | None = None
         self.generated_count = 0
+        self.robust_analysis_count = 0
+        self.candidate_count = 0
 
         self.width_spin = QSpinBox()
-        self.width_spin.setRange(1, 4096)
+        self.width_spin.setRange(2, 4096)
         self.width_spin.setValue(64)
 
         self.height_spin = QSpinBox()
-        self.height_spin.setRange(1, 4096)
+        self.height_spin.setRange(2, 4096)
         self.height_spin.setValue(64)
 
         self.interval_spin = QSpinBox()
@@ -72,6 +77,9 @@ class RandomImageGenerator(QMainWindow):
         )
 
         self.stats_label = QLabel("Сгенерировано: 0")
+        self.analysis_label = QLabel(
+            "MVP: — | Robust: — | Robust запусков: 0 | Кандидатов: 0"
+        )
 
         form = QFormLayout()
         form.addRow("Ширина:", self.width_spin)
@@ -89,6 +97,7 @@ class RandomImageGenerator(QMainWindow):
         layout.addWidget(self.render_checkbox)
         layout.addLayout(controls)
         layout.addWidget(self.stats_label)
+        layout.addWidget(self.analysis_label)
         layout.addWidget(self.image_label, 1)
 
         root = QWidget()
@@ -115,10 +124,13 @@ class RandomImageGenerator(QMainWindow):
         height = self.height_spin.value()
 
         pixels = np.random.randint(
-            0, 256,
+            0,
+            256,
             size=(height, width, 3),
             dtype=np.uint8,
         )
+
+        analysis = self.analysis_pipeline.analyze(pixels)
 
         qimage = QImage(
             pixels.data,
@@ -130,15 +142,44 @@ class RandomImageGenerator(QMainWindow):
 
         self.current_image = qimage
         self.generated_count += 1
-        self.stats_label.setText(
-            f"Сгенерировано: {self.generated_count} | "
-            f"Размер: {width}×{height} | "
-            f"Цветов на пиксель: 16 777 216"
-        )
+        self._record_analysis(analysis)
+        self._update_stats(width, height, analysis)
         self.save_button.setEnabled(True)
 
         if self.render_checkbox.isChecked():
             self.show_current_image()
+
+    def _record_analysis(self, analysis: PipelineResult):
+        if analysis.robust is not None:
+            self.robust_analysis_count += 1
+        if analysis.is_candidate:
+            self.candidate_count += 1
+
+    def _update_stats(
+        self,
+        width: int,
+        height: int,
+        analysis: PipelineResult,
+    ):
+        self.stats_label.setText(
+            f"Сгенерировано: {self.generated_count} | "
+            f"Размер: {width}×{height}"
+        )
+
+        mvp = analysis.mvp
+        robust_text = "пропущен"
+        if analysis.robust is not None:
+            robust = analysis.robust
+            robust_text = f"{robust.score:.1f}/{robust.threshold:.1f}"
+
+        candidate_text = " | КАНДИДАТ" if analysis.is_candidate else ""
+        self.analysis_label.setText(
+            f"MVP: {mvp.score:.1f}/{mvp.threshold:.1f} | "
+            f"Robust: {robust_text} | "
+            f"Robust запусков: {self.robust_analysis_count} | "
+            f"Кандидатов: {self.candidate_count}"
+            f"{candidate_text}"
+        )
 
     def show_current_image(self):
         if self.current_image is None:
