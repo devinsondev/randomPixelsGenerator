@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import queue
+import secrets
 from dataclasses import dataclass
+from pathlib import Path
 
+from experiment_session import ExperimentSession
 from parallel_worker import run_generator_worker
 from worker_protocol import WorkerConfig, WorkerSnapshot
 
@@ -20,12 +23,16 @@ class _WorkerHandle:
 
 
 class ProcessManager:
-    """Own child generator processes and expose non-blocking UI operations."""
+    """Own child generator processes and one experiment session."""
 
     def __init__(self, initial_config: WorkerConfig) -> None:
         self._context = mp.get_context("spawn")
         self._config = initial_config.validated()
         self._workers: dict[int, _WorkerHandle] = {}
+        self._session = ExperimentSession(
+            root=Path("experiment_data"),
+            initial_config=self._config,
+        )
 
     @property
     def worker_count(self) -> int:
@@ -35,11 +42,18 @@ class ProcessManager:
     def worker_ids(self) -> tuple[int, ...]:
         return tuple(sorted(self._workers))
 
+    @property
+    def session_dir(self) -> Path:
+        return self._session.path
+
     def add_worker(self) -> int:
         if self.worker_count >= MAX_WORKERS:
             raise ValueError(f"Maximum worker count is {MAX_WORKERS}.")
 
         worker_id = self._first_free_id()
+        worker_seed = secrets.randbits(64)
+        self._session.add_worker(worker_id, worker_seed)
+
         command_queue = self._context.Queue(maxsize=1)
         output_queue = self._context.Queue(maxsize=2)
         stop_event = self._context.Event()
@@ -48,6 +62,8 @@ class ProcessManager:
             target=run_generator_worker,
             args=(
                 worker_id,
+                worker_seed,
+                self._session.path,
                 self._config,
                 command_queue,
                 output_queue,
@@ -101,7 +117,7 @@ class ProcessManager:
             handle.stop_event.set()
 
         for handle in self._workers.values():
-            handle.process.join(timeout=2.0)
+            handle.process.join(timeout=3.0)
 
         for worker_id in list(self._workers):
             self._stop_worker(worker_id, already_signaled=True)
@@ -111,7 +127,7 @@ class ProcessManager:
 
         if not already_signaled:
             handle.stop_event.set()
-            handle.process.join(timeout=2.0)
+            handle.process.join(timeout=3.0)
 
         if handle.process.is_alive():
             handle.process.terminate()
