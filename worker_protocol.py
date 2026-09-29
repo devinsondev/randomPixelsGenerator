@@ -13,6 +13,7 @@ class WorkerConfig:
     top_percent: float
     threshold_warmup: int
     auto_save: bool
+    sqlite_logging: bool
     send_image: bool
 
     def validated(self) -> "WorkerConfig":
@@ -56,6 +57,7 @@ class WorkerSnapshot:
     robust_candidates: int
     saved_mvp: int
     saved_robust: int
+    sqlite_logging: bool
     top_scores: tuple[tuple[int, float], ...]
     image_rgb: bytes | None
     error: str | None = None
