@@ -68,6 +68,7 @@ class SessionStats:
     def __init__(self) -> None:
         self.mvp = ScoreStats(top_size=10)
         self.mvp_passed = 0
-        self.saved = 0
+        self.saved_mvp = 0
+        self.saved_robust = 0
         self.robust_runs = 0
         self.robust_candidates = 0
