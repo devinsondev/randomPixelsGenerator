@@ -156,11 +156,12 @@ class RandomImageGenerator(QMainWindow):
         if self.manager is not None:
             return
 
+        manager = ProcessManager(self._worker_config())
         try:
-            manager = ProcessManager(self._worker_config())
             for _ in range(len(self.lanes)):
                 manager.add_worker()
         except Exception as error:
+            manager.stop_all()
             QMessageBox.critical(self, "Ошибка запуска", str(error))
             return
 
@@ -191,7 +192,15 @@ class RandomImageGenerator(QMainWindow):
             return
 
         if self.manager is not None:
-            worker_id = self.manager.add_worker()
+            try:
+                worker_id = self.manager.add_worker()
+            except Exception as error:
+                QMessageBox.critical(
+                    self,
+                    "Ошибка запуска параллели",
+                    str(error),
+                )
+                return
         else:
             worker_id = self._first_free_lane_id()
 
