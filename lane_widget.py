@@ -79,7 +79,8 @@ class LaneWidget(QFrame):
             f"{snapshot.fps:,.1f} кадр/с | "
             f"{snapshot.width}×{snapshot.height} | "
             f"MVP PNG: {snapshot.saved_mvp} | "
-            f"Robust PNG: {snapshot.saved_robust}"
+            f"Robust PNG: {snapshot.saved_robust} | "
+            f"SQLite: {'ON' if snapshot.sqlite_logging else 'OFF'}"
         )
 
         self.mvp_label.setText(
