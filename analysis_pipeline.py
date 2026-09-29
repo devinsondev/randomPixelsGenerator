@@ -31,6 +31,14 @@ class AnalysisPipeline:
         self._mvp = mvp or MvpAnalyzer()
         self._robust = robust or RobustAnalyzer()
 
+    @property
+    def mvp_threshold(self) -> float:
+        return self._mvp.threshold
+
+    def set_mvp_threshold(self, threshold: float) -> None:
+        """Apply a new first-stage threshold without changing robust settings."""
+        self._mvp = MvpAnalyzer(threshold=threshold)
+
     def analyze(self, image: NDArray[np.generic]) -> PipelineResult:
         mvp_result = self._mvp.analyze(image)
 
