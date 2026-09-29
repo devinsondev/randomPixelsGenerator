@@ -194,6 +194,8 @@ def _record_analysis(
                     worker_seed=worker_seed,
                     frame_seed=frame_seed,
                     analysis=analysis,
+                    threshold_mode=threshold_mode,
+                    top_percent=top_percent,
                 )
                 stats.saved_mvp += 1
                 if saved.robust_png is not None:
