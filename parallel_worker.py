@@ -62,7 +62,10 @@ def run_generator_worker(
             config = _latest_config(command_queue, config)
 
             current_shape = (config.width, config.height)
-            if current_shape != previous_shape:
+            if (
+                current_shape != previous_shape
+                or config.threshold_warmup != tracker.warmup_frames
+            ):
                 tracker.reset(warmup_frames=config.threshold_warmup)
                 previous_shape = current_shape
 
