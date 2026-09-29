@@ -34,6 +34,8 @@ class CandidateStore:
         worker_seed: int,
         frame_seed: int,
         analysis: PipelineResult,
+        threshold_mode: str,
+        top_percent: float,
     ) -> SavedCandidate:
         if not analysis.mvp.is_interesting:
             raise ValueError("Only MVP-passing frames may be auto-saved.")
@@ -50,6 +52,8 @@ class CandidateStore:
             worker_seed=worker_seed,
             frame_seed=frame_seed,
             analysis=analysis,
+            threshold_mode=threshold_mode,
+            top_percent=top_percent,
         )
 
         robust_png: Path | None = None
@@ -79,6 +83,8 @@ class CandidateStore:
         worker_seed: int,
         frame_seed: int,
         analysis: PipelineResult,
+        threshold_mode: str,
+        top_percent: float,
     ) -> Path:
         directory = self._root / stage / f"worker_{self._worker_id:02d}"
         png_path = directory / f"{base_name}.png"
@@ -94,6 +100,8 @@ class CandidateStore:
                     worker_seed=worker_seed,
                     frame_seed=frame_seed,
                     analysis=analysis,
+                    threshold_mode=threshold_mode,
+                    top_percent=top_percent,
                 ),
                 indent=2,
                 ensure_ascii=False,
@@ -112,6 +120,8 @@ class CandidateStore:
         worker_seed: int,
         frame_seed: int,
         analysis: PipelineResult,
+        threshold_mode: str,
+        top_percent: float,
     ) -> dict[str, object]:
         robust = analysis.robust
         return {
@@ -126,6 +136,10 @@ class CandidateStore:
                 np.ascontiguousarray(image).tobytes(order="C")
             ).hexdigest(),
             "saved_utc": datetime.now(timezone.utc).isoformat(),
+            "threshold_policy": {
+                "mode": threshold_mode,
+                "top_percent": float(top_percent),
+            },
             "mvp": _analysis_payload(analysis.mvp),
             "robust": (
                 None if robust is None else _analysis_payload(robust)
