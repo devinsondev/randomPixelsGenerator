@@ -11,8 +11,9 @@ from tools.clipboard_resizer.sanity_check import (
 
 def qimage_from_rgb(rgb: np.ndarray) -> QImage:
     height, width, _ = rgb.shape
+    raw = np.ascontiguousarray(rgb).tobytes(order="C")
     image = QImage(
-        rgb.data,
+        raw,
         width,
         height,
         width * 3,
