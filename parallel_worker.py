@@ -243,6 +243,7 @@ def _build_snapshot(
         threshold_mode=threshold_mode,
         top_percent=config.top_percent,
         percentile_samples=tracker.count,
+        threshold_warmup=config.threshold_warmup,
         mvp_passed=stats.mvp_passed,
         robust_score=robust_score,
         robust_threshold=robust_threshold,
