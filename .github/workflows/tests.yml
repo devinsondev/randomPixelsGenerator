@@ -34,7 +34,7 @@ jobs:
       - name: Import application modules
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -c "import main, control_panel, lane_widget, process_manager, parallel_worker"
+        run: python -c "import main, control_panel, lane_widget, process_manager, parallel_worker, tools.batch_analyzer.main, tools.batch_analyzer.engine"
 
       - name: Unit tests
         run: python -m unittest discover -s tests -v
