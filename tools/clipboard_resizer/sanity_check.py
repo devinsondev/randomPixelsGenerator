@@ -83,7 +83,10 @@ def qimage_to_rgb(image: QImage) -> NDArray[np.uint8]:
     )
     rows = buffer.reshape(height, bytes_per_line)
     pixels = rows[:, : width * 3].reshape(height, width, 3)
-    return np.ascontiguousarray(pixels)
+
+    # QImage owns the underlying buffer. Returning a view would leave NumPy
+    # pointing at memory whose lifetime ends with this local QImage.
+    return np.array(pixels, dtype=np.uint8, copy=True, order="C")
 
 
 def format_sample(sample: SanitySample) -> str:
