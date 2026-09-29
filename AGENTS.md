@@ -91,9 +91,10 @@ not semantic meaning. A later vision model may inspect only the rare candidates.
 ## Current pipeline
 
 random RGB image
-  -> MvpAnalyzer (cheap)
-  -> if score >= threshold: RobustAnalyzer (shuffled-control comparison)
-  -> if score >= threshold: save candidate / future VLM inspection
+  -> MvpAnalyzer (cheap, runtime-configurable threshold)
+  -> if MVP passes: optional auto-save to candidates/
+  -> if MVP passes: RobustAnalyzer (shuffled-control comparison)
+  -> if Robust passes: mark as robust candidate / future VLM inspection
 
 This ordering is intentional: reject obvious white noise cheaply, spend more CPU
 only on anomalous candidates, and reserve any future VLM calls for the tiny tail.
