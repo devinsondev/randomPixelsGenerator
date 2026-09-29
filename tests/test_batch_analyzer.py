@@ -12,8 +12,9 @@ from tools.clipboard_resizer.resizer import ResizeFilter, ResizeMode
 
 def save_rgb(path: Path, rgb: np.ndarray) -> None:
     height, width, _ = rgb.shape
+    raw = np.ascontiguousarray(rgb).tobytes(order="C")
     image = QImage(
-        rgb.data,
+        raw,
         width,
         height,
         width * 3,
