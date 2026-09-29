@@ -162,3 +162,22 @@ python tools\clipboard_resizer\main.py
 
 Можно задать точные W×H, выбрать Stretch/Fit/Cover и Nearest/Smooth, затем
 сохранить результат или скопировать его обратно в буфер.
+
+
+## Image Batch Sanity Analyzer
+
+Для проверки целой папки реальных изображений:
+
+```powershell
+python tools\batch_analyzer\main.py
+```
+
+Тулза рекурсивно сканирует папку, приводит каждое изображение к выбранному W×H
+и выводит таблицу с маленьким 8×8/16×16 preview и score:
+
+- Real MVP / Robust;
+- Shuffled MVP / Robust;
+- Random MVP / Robust.
+
+Анализ идёт в отдельном потоке, есть progress и отмена. По завершении выводятся
+средние score по всей выборке.
