@@ -1,7 +1,7 @@
 import unittest
 
 import numpy as np
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QColor, QImage
 
 from tools.clipboard_resizer.sanity_check import (
     SanityChecker,
@@ -11,15 +11,12 @@ from tools.clipboard_resizer.sanity_check import (
 
 def qimage_from_rgb(rgb: np.ndarray) -> QImage:
     height, width, _ = rgb.shape
-    raw = np.ascontiguousarray(rgb).tobytes(order="C")
-    image = QImage(
-        raw,
-        width,
-        height,
-        width * 3,
-        QImage.Format_RGB888,
-    )
-    return image.copy()
+    image = QImage(width, height, QImage.Format_RGB888)
+    for y in range(height):
+        for x in range(width):
+            red, green, blue = (int(value) for value in rgb[y, x])
+            image.setPixelColor(x, y, QColor(red, green, blue))
+    return image
 
 
 class SanityCheckerTests(unittest.TestCase):
