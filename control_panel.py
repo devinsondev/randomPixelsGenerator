@@ -64,6 +64,9 @@ class ControlPanel(QWidget):
         )
         self.auto_save_checkbox.setChecked(True)
 
+        self.sqlite_checkbox = QCheckBox("Записывать SQLite")
+        self.sqlite_checkbox.setChecked(True)
+
         self.start_button = QPushButton("Старт")
         self.stop_button = QPushButton("Стоп")
         self.stop_button.setEnabled(False)
@@ -97,6 +100,7 @@ class ControlPanel(QWidget):
             top_percent=self.top_percent_spin.value(),
             threshold_warmup=self.warmup_spin.value(),
             auto_save=self.auto_save_checkbox.isChecked(),
+            sqlite_logging=self.sqlite_checkbox.isChecked(),
             send_image=self.render_checkbox.isChecked(),
         )
 
@@ -129,6 +133,7 @@ class ControlPanel(QWidget):
         options.addWidget(self.auto_threshold_checkbox)
         options.addWidget(self.render_checkbox)
         options.addWidget(self.auto_save_checkbox)
+        options.addWidget(self.sqlite_checkbox)
         options.addStretch(1)
 
         controls = QHBoxLayout()
@@ -169,6 +174,9 @@ class ControlPanel(QWidget):
             lambda _checked: self.config_changed.emit()
         )
         self.auto_save_checkbox.toggled.connect(
+            lambda _checked: self.config_changed.emit()
+        )
+        self.sqlite_checkbox.toggled.connect(
             lambda _checked: self.config_changed.emit()
         )
 
