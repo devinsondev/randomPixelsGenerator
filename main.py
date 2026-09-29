@@ -7,6 +7,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -20,6 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from analysis_pipeline import AnalysisPipeline, PipelineResult
+from candidate_store import CandidateStore
+from session_stats import SessionStats
 
 
 class RandomImageGenerator(QMainWindow):
@@ -27,16 +30,17 @@ class RandomImageGenerator(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Random RGB Image Generator")
-        self.resize(900, 700)
+        self.resize(1000, 760)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.generate_image)
 
         self.analysis_pipeline = AnalysisPipeline()
+        self.candidate_store = CandidateStore()
+        self.session = SessionStats()
+
         self.current_image: QImage | None = None
         self.generated_count = 0
-        self.robust_analysis_count = 0
-        self.candidate_count = 0
 
         self.width_spin = QSpinBox()
         self.width_spin.setRange(2, 4096)
@@ -52,8 +56,21 @@ class RandomImageGenerator(QMainWindow):
         self.interval_spin.setSuffix(" ms")
         self.interval_spin.valueChanged.connect(self.update_timer_interval)
 
+        self.mvp_threshold_spin = QDoubleSpinBox()
+        self.mvp_threshold_spin.setRange(0.0, 100.0)
+        self.mvp_threshold_spin.setDecimals(1)
+        self.mvp_threshold_spin.setSingleStep(0.5)
+        self.mvp_threshold_spin.setValue(self.analysis_pipeline.mvp_threshold)
+        self.mvp_threshold_spin.setSuffix(" / 100")
+        self.mvp_threshold_spin.valueChanged.connect(self.update_mvp_threshold)
+
         self.render_checkbox = QCheckBox("Показывать изображение")
         self.render_checkbox.setChecked(True)
+
+        self.auto_save_checkbox = QCheckBox(
+            "Автосохранять кадры, прошедшие MVP"
+        )
+        self.auto_save_checkbox.setChecked(True)
 
         self.start_button = QPushButton("Старт")
         self.start_button.clicked.connect(self.start_generation)
@@ -76,15 +93,18 @@ class RandomImageGenerator(QMainWindow):
             "QLabel { background: #181818; color: #d0d0d0; border: 1px solid #444; }"
         )
 
-        self.stats_label = QLabel("Сгенерировано: 0")
+        self.stats_label = QLabel("Сессия: кадров 0")
         self.analysis_label = QLabel(
-            "MVP: — | Robust: — | Robust запусков: 0 | Кандидатов: 0"
+            "MVP: — | Robust: — | MVP прошло: 0 | Robust запусков: 0"
         )
+        self.top_label = QLabel("Top-10 MVP: —")
+        self.top_label.setWordWrap(True)
 
         form = QFormLayout()
         form.addRow("Ширина:", self.width_spin)
         form.addRow("Высота:", self.height_spin)
         form.addRow("Интервал:", self.interval_spin)
+        form.addRow("Порог MVP:", self.mvp_threshold_spin)
 
         controls = QHBoxLayout()
         controls.addWidget(self.start_button)
@@ -95,9 +115,11 @@ class RandomImageGenerator(QMainWindow):
         layout = QVBoxLayout()
         layout.addLayout(form)
         layout.addWidget(self.render_checkbox)
+        layout.addWidget(self.auto_save_checkbox)
         layout.addLayout(controls)
         layout.addWidget(self.stats_label)
         layout.addWidget(self.analysis_label)
+        layout.addWidget(self.top_label)
         layout.addWidget(self.image_label, 1)
 
         root = QWidget()
@@ -107,6 +129,9 @@ class RandomImageGenerator(QMainWindow):
     def update_timer_interval(self, value: int):
         if self.timer.isActive():
             self.timer.setInterval(value)
+
+    def update_mvp_threshold(self, value: float):
+        self.analysis_pipeline.set_mvp_threshold(value)
 
     def start_generation(self):
         self.timer.start(self.interval_spin.value())
@@ -131,6 +156,7 @@ class RandomImageGenerator(QMainWindow):
         )
 
         analysis = self.analysis_pipeline.analyze(pixels)
+        frame_index = self.generated_count + 1
 
         qimage = QImage(
             pixels.data,
@@ -141,19 +167,52 @@ class RandomImageGenerator(QMainWindow):
         ).copy()
 
         self.current_image = qimage
-        self.generated_count += 1
-        self._record_analysis(analysis)
+        self.generated_count = frame_index
+
+        self._record_analysis(frame_index, pixels, analysis)
         self._update_stats(width, height, analysis)
         self.save_button.setEnabled(True)
 
         if self.render_checkbox.isChecked():
             self.show_current_image()
 
-    def _record_analysis(self, analysis: PipelineResult):
+    def _record_analysis(
+        self,
+        frame_index: int,
+        pixels: np.ndarray,
+        analysis: PipelineResult,
+    ):
+        self.session.mvp.record(frame_index, analysis.mvp.score)
+
+        if analysis.mvp.is_interesting:
+            self.session.mvp_passed += 1
+            if self.auto_save_checkbox.isChecked():
+                self._auto_save_candidate(pixels, frame_index, analysis)
+
         if analysis.robust is not None:
-            self.robust_analysis_count += 1
+            self.session.robust_runs += 1
+
         if analysis.is_candidate:
-            self.candidate_count += 1
+            self.session.robust_candidates += 1
+
+    def _auto_save_candidate(
+        self,
+        pixels: np.ndarray,
+        frame_index: int,
+        analysis: PipelineResult,
+    ):
+        try:
+            self.candidate_store.save(pixels, frame_index, analysis)
+        except OSError as error:
+            self.auto_save_checkbox.setChecked(False)
+            QMessageBox.critical(
+                self,
+                "Ошибка автосохранения",
+                f"Автосохранение отключено:\n{error}",
+            )
+            return
+
+        self.session.saved += 1
 
     def _update_stats(
         self,
@@ -161,25 +220,40 @@ class RandomImageGenerator(QMainWindow):
         height: int,
         analysis: PipelineResult,
     ):
+        maximum = self.session.mvp.maximum
+        maximum_text = "—"
+        if maximum is not None:
+            maximum_text = f"{maximum.score:.2f} на #{maximum.frame_index}"
+
         self.stats_label.setText(
-            f"Сгенерировано: {self.generated_count} | "
-            f"Размер: {width}×{height}"
+            f"Сессия: кадров {self.generated_count} | "
+            f"Размер {width}×{height} | "
+            f"MVP avg {self.session.mvp.average:.2f} | "
+            f"MVP max {maximum_text} | "
+            f"Сохранено {self.session.saved}"
         )
 
-        mvp = analysis.mvp
         robust_text = "пропущен"
         if analysis.robust is not None:
-            robust = analysis.robust
-            robust_text = f"{robust.score:.1f}/{robust.threshold:.1f}"
+            robust_text = (
+                f"{analysis.robust.score:.1f}/{analysis.robust.threshold:.1f}"
+            )
 
-        candidate_text = " | КАНДИДАТ" if analysis.is_candidate else ""
+        passed_marker = " | MVP ПРОШЁЛ" if analysis.mvp.is_interesting else ""
         self.analysis_label.setText(
-            f"MVP: {mvp.score:.1f}/{mvp.threshold:.1f} | "
+            f"MVP: {analysis.mvp.score:.2f}/{analysis.mvp.threshold:.1f} | "
             f"Robust: {robust_text} | "
-            f"Robust запусков: {self.robust_analysis_count} | "
-            f"Кандидатов: {self.candidate_count}"
-            f"{candidate_text}"
+            f"MVP прошло: {self.session.mvp_passed} | "
+            f"Robust запусков: {self.session.robust_runs} | "
+            f"Robust кандидатов: {self.session.robust_candidates}"
+            f"{passed_marker}"
         )
+
+        top_text = ", ".join(
+            f"{item.score:.2f} (#{item.frame_index})"
+            for item in self.session.mvp.top
+        )
+        self.top_label.setText(f"Top-10 MVP: {top_text or '—'}")
 
     def show_current_image(self):
         if self.current_image is None:
