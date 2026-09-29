@@ -47,6 +47,15 @@ class AnalysisPipelineTests(unittest.TestCase):
         self.assertTrue(result.is_candidate)
         robust.analyze.assert_called_once_with(self.image)
 
+    def test_mvp_threshold_can_change_at_runtime(self) -> None:
+        pipeline = AnalysisPipeline()
+
+        pipeline.set_mvp_threshold(7.5)
+
+        self.assertEqual(pipeline.mvp_threshold, 7.5)
+        result = pipeline.analyze(self.image)
+        self.assertEqual(result.mvp.threshold, 7.5)
+
 
 if __name__ == "__main__":
     unittest.main()
