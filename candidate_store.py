@@ -69,6 +69,8 @@ class CandidateStore:
                 worker_seed=worker_seed,
                 frame_seed=frame_seed,
                 analysis=analysis,
+                threshold_mode=threshold_mode,
+                top_percent=top_percent,
             )
 
         return SavedCandidate(mvp_png=mvp_png, robust_png=robust_png)
