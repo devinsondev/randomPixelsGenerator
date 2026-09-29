@@ -13,6 +13,7 @@ def make_config(**overrides) -> WorkerConfig:
         "top_percent": 0.01,
         "threshold_warmup": 10_000,
         "auto_save": True,
+        "sqlite_logging": True,
         "send_image": True,
     }
     values.update(overrides)
