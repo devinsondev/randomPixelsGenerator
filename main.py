@@ -1,75 +1,64 @@
+from __future__ import annotations
+
+import multiprocessing as mp
 import sys
 from pathlib import Path
 
-import numpy as np
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from analysis_pipeline import AnalysisPipeline, PipelineResult
-from candidate_store import CandidateStore
-from session_stats import SessionStats
+from lane_widget import LaneWidget
+from process_manager import MAX_WORKERS, ProcessManager
+from worker_protocol import WorkerConfig, WorkerSnapshot
 
 
 class RandomImageGenerator(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.setWindowTitle("Random RGB Image Generator")
-        self.resize(1000, 760)
+        self.resize(1450, 900)
 
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.generate_image)
+        self.manager: ProcessManager | None = None
+        self.lanes: dict[int, LaneWidget] = {}
+        self.latest: dict[int, WorkerSnapshot] = {}
 
-        self.analysis_pipeline = AnalysisPipeline()
-        self.candidate_store = CandidateStore()
-        self.session = SessionStats()
+        self.poll_timer = QTimer(self)
+        self.poll_timer.setInterval(30)
+        self.poll_timer.timeout.connect(self._poll_workers)
 
-        self.current_image: QImage | None = None
-        self.generated_count = 0
-
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(2, 4096)
-        self.width_spin.setValue(64)
-
-        self.height_spin = QSpinBox()
-        self.height_spin.setRange(2, 4096)
-        self.height_spin.setValue(64)
-
-        self.interval_spin = QSpinBox()
-        self.interval_spin.setRange(1, 60_000)
-        self.interval_spin.setValue(250)
+        self.width_spin = self._int_spin(2, 4096, 64)
+        self.height_spin = self._int_spin(2, 4096, 64)
+        self.interval_spin = self._int_spin(1, 60_000, 1)
         self.interval_spin.setSuffix(" ms")
-        self.interval_spin.valueChanged.connect(self.update_timer_interval)
 
         self.mvp_threshold_spin = QDoubleSpinBox()
         self.mvp_threshold_spin.setRange(0.0, 100.0)
         self.mvp_threshold_spin.setDecimals(1)
         self.mvp_threshold_spin.setSingleStep(0.5)
-        self.mvp_threshold_spin.setValue(self.analysis_pipeline.mvp_threshold)
+        self.mvp_threshold_spin.setValue(18.0)
         self.mvp_threshold_spin.setSuffix(" / 100")
-        self.mvp_threshold_spin.valueChanged.connect(self.update_mvp_threshold)
 
-        self.render_checkbox = QCheckBox("Показывать изображение")
+        self.render_checkbox = QCheckBox("Показывать изображения")
         self.render_checkbox.setChecked(True)
 
-        self.auto_save_checkbox = QCheckBox(
-            "Автосохранять кадры, прошедшие MVP"
-        )
+        self.auto_save_checkbox = QCheckBox("Автосохранять прошедшие MVP")
         self.auto_save_checkbox.setChecked(True)
 
         self.start_button = QPushButton("Старт")
@@ -79,227 +68,251 @@ class RandomImageGenerator(QMainWindow):
         self.stop_button.clicked.connect(self.stop_generation)
         self.stop_button.setEnabled(False)
 
-        self.generate_once_button = QPushButton("Сгенерировать 1 раз")
-        self.generate_once_button.clicked.connect(self.generate_image)
+        self.add_parallel_button = QPushButton("+ параллель")
+        self.add_parallel_button.clicked.connect(self.add_parallel)
 
-        self.save_button = QPushButton("Сохранить текущую")
-        self.save_button.clicked.connect(self.save_current_image)
-        self.save_button.setEnabled(False)
+        self.remove_parallel_button = QPushButton("− параллель")
+        self.remove_parallel_button.clicked.connect(self.remove_parallel)
 
-        self.image_label = QLabel("Нажми «Старт» или «Сгенерировать 1 раз»")
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumSize(500, 400)
-        self.image_label.setStyleSheet(
-            "QLabel { background: #181818; color: #d0d0d0; border: 1px solid #444; }"
-        )
+        self.parallel_label = QLabel("Параллелей: 1 / 16")
+        self.summary_label = QLabel("Готово к запуску")
+        self.summary_label.setWordWrap(True)
 
-        self.stats_label = QLabel("Сессия: кадров 0")
-        self.analysis_label = QLabel(
-            "MVP: — | Robust: — | MVP прошло: 0 | Robust запусков: 0"
-        )
-        self.top_label = QLabel("Top-10 MVP: —")
-        self.top_label.setWordWrap(True)
+        self.grid_host = QWidget()
+        self.grid = QGridLayout(self.grid_host)
+        self.grid.setContentsMargins(4, 4, 4, 4)
+        self.grid.setSpacing(8)
 
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(self.grid_host)
+
+        self._build_layout()
+        self._create_lane(1)
+        self._connect_live_settings()
+
+    @staticmethod
+    def _int_spin(minimum: int, maximum: int, value: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setValue(value)
+        return spin
+
+    def _build_layout(self) -> None:
         form = QFormLayout()
         form.addRow("Ширина:", self.width_spin)
         form.addRow("Высота:", self.height_spin)
         form.addRow("Интервал:", self.interval_spin)
         form.addRow("Порог MVP:", self.mvp_threshold_spin)
 
+        options = QHBoxLayout()
+        options.addWidget(self.render_checkbox)
+        options.addWidget(self.auto_save_checkbox)
+        options.addStretch(1)
+
         controls = QHBoxLayout()
         controls.addWidget(self.start_button)
         controls.addWidget(self.stop_button)
-        controls.addWidget(self.generate_once_button)
-        controls.addWidget(self.save_button)
+        controls.addSpacing(20)
+        controls.addWidget(self.add_parallel_button)
+        controls.addWidget(self.remove_parallel_button)
+        controls.addWidget(self.parallel_label)
+        controls.addStretch(1)
 
         layout = QVBoxLayout()
         layout.addLayout(form)
-        layout.addWidget(self.render_checkbox)
-        layout.addWidget(self.auto_save_checkbox)
+        layout.addLayout(options)
         layout.addLayout(controls)
-        layout.addWidget(self.stats_label)
-        layout.addWidget(self.analysis_label)
-        layout.addWidget(self.top_label)
-        layout.addWidget(self.image_label, 1)
+        layout.addWidget(self.summary_label)
+        layout.addWidget(self.scroll, 1)
 
         root = QWidget()
         root.setLayout(layout)
         self.setCentralWidget(root)
 
-    def update_timer_interval(self, value: int):
-        if self.timer.isActive():
-            self.timer.setInterval(value)
+    def _connect_live_settings(self) -> None:
+        self.width_spin.valueChanged.connect(self._push_config)
+        self.height_spin.valueChanged.connect(self._push_config)
+        self.interval_spin.valueChanged.connect(self._push_config)
+        self.mvp_threshold_spin.valueChanged.connect(self._push_config)
+        self.render_checkbox.toggled.connect(self._push_config)
+        self.auto_save_checkbox.toggled.connect(self._push_config)
 
-    def update_mvp_threshold(self, value: float):
-        self.analysis_pipeline.set_mvp_threshold(value)
+    def _worker_config(self) -> WorkerConfig:
+        return WorkerConfig(
+            width=self.width_spin.value(),
+            height=self.height_spin.value(),
+            interval_ms=self.interval_spin.value(),
+            mvp_threshold=self.mvp_threshold_spin.value(),
+            auto_save=self.auto_save_checkbox.isChecked(),
+            send_image=self.render_checkbox.isChecked(),
+        )
 
-    def start_generation(self):
-        self.timer.start(self.interval_spin.value())
+    def _push_config(self, *_args) -> None:
+        if self.manager is not None:
+            self.manager.update_config(self._worker_config())
+
+    def start_generation(self) -> None:
+        if self.manager is not None:
+            return
+
+        try:
+            manager = ProcessManager(self._worker_config())
+            for _ in range(len(self.lanes)):
+                manager.add_worker()
+        except Exception as error:
+            QMessageBox.critical(self, "Ошибка запуска", str(error))
+            return
+
+        self.manager = manager
+        self.latest.clear()
+        self.poll_timer.start()
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        self.generate_image()
+        self.summary_label.setText("Генерация запущена")
 
-    def stop_generation(self):
-        self.timer.stop()
+    def stop_generation(self) -> None:
+        if self.manager is None:
+            return
+
+        self.poll_timer.stop()
+        self.manager.stop_all()
+        self.manager = None
+
+        for lane in self.lanes.values():
+            lane.set_stopped()
+
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+        self._update_summary()
 
-    def generate_image(self):
-        width = self.width_spin.value()
-        height = self.height_spin.value()
+    def add_parallel(self) -> None:
+        if len(self.lanes) >= MAX_WORKERS:
+            return
 
-        pixels = np.random.randint(
-            0,
-            256,
-            size=(height, width, 3),
-            dtype=np.uint8,
+        if self.manager is not None:
+            worker_id = self.manager.add_worker()
+        else:
+            worker_id = self._first_free_lane_id()
+
+        self._create_lane(worker_id)
+        self._update_parallel_label()
+
+    def remove_parallel(self) -> None:
+        if len(self.lanes) <= 1:
+            return
+
+        if self.manager is not None:
+            worker_id = self.manager.remove_last_worker()
+            if worker_id is None:
+                return
+        else:
+            worker_id = max(self.lanes)
+
+        self._remove_lane(worker_id)
+        self._update_parallel_label()
+        self._update_summary()
+
+    def _create_lane(self, worker_id: int) -> None:
+        lane = LaneWidget(worker_id)
+        lane.save_requested.connect(self.save_lane_image)
+        self.lanes[worker_id] = lane
+
+        index = worker_id - 1
+        row = index // 4
+        column = index % 4
+        self.grid.addWidget(lane, row, column)
+        self._update_parallel_label()
+
+    def _remove_lane(self, worker_id: int) -> None:
+        lane = self.lanes.pop(worker_id)
+        self.latest.pop(worker_id, None)
+        self.grid.removeWidget(lane)
+        lane.deleteLater()
+
+    def _first_free_lane_id(self) -> int:
+        for worker_id in range(1, MAX_WORKERS + 1):
+            if worker_id not in self.lanes:
+                return worker_id
+        raise RuntimeError("Нет свободного ID параллели.")
+
+    def _update_parallel_label(self) -> None:
+        self.parallel_label.setText(
+            f"Параллелей: {len(self.lanes)} / {MAX_WORKERS}"
         )
+        self.remove_parallel_button.setEnabled(len(self.lanes) > 1)
+        self.add_parallel_button.setEnabled(len(self.lanes) < MAX_WORKERS)
 
-        analysis = self.analysis_pipeline.analyze(pixels)
-        frame_index = self.generated_count + 1
+    def _poll_workers(self) -> None:
+        if self.manager is None:
+            return
 
-        qimage = QImage(
-            pixels.data,
-            width,
-            height,
-            width * 3,
-            QImage.Format_RGB888,
-        ).copy()
+        for snapshot in self.manager.poll_latest():
+            self.latest[snapshot.worker_id] = snapshot
+            lane = self.lanes.get(snapshot.worker_id)
+            if lane is not None:
+                lane.update_snapshot(snapshot)
 
-        self.current_image = qimage
-        self.generated_count = frame_index
+        self._update_summary()
 
-        self._record_analysis(frame_index, pixels, analysis)
-        self._update_stats(width, height, analysis)
-        self.save_button.setEnabled(True)
-
-        if self.render_checkbox.isChecked():
-            self.show_current_image()
-
-    def _record_analysis(
-        self,
-        frame_index: int,
-        pixels: np.ndarray,
-        analysis: PipelineResult,
-    ):
-        self.session.mvp.record(frame_index, analysis.mvp.score)
-
-        if analysis.mvp.is_interesting:
-            self.session.mvp_passed += 1
-            if self.auto_save_checkbox.isChecked():
-                self._auto_save_candidate(pixels, frame_index, analysis)
-
-        if analysis.robust is not None:
-            self.session.robust_runs += 1
-
-        if analysis.is_candidate:
-            self.session.robust_candidates += 1
-
-    def _auto_save_candidate(
-        self,
-        pixels: np.ndarray,
-        frame_index: int,
-        analysis: PipelineResult,
-    ):
-        try:
-            self.candidate_store.save(pixels, frame_index, analysis)
-        except OSError as error:
-            self.auto_save_checkbox.setChecked(False)
-            QMessageBox.critical(
-                self,
-                "Ошибка автосохранения",
-                f"Автосохранение отключено:\n{error}",
+    def _update_summary(self) -> None:
+        if not self.latest:
+            self.summary_label.setText(
+                f"Параллелей: {len(self.lanes)} | данных пока нет"
             )
             return
 
-        self.session.saved += 1
+        snapshots = [
+            self.latest[worker_id]
+            for worker_id in self.lanes
+            if worker_id in self.latest
+        ]
+        frames = sum(item.frame_index for item in snapshots)
+        fps = sum(item.fps for item in snapshots)
+        passed = sum(item.mvp_passed for item in snapshots)
+        saved = sum(item.saved for item in snapshots)
+        robust_runs = sum(item.robust_runs for item in snapshots)
+        robust_candidates = sum(item.robust_candidates for item in snapshots)
 
-    def _update_stats(
-        self,
-        width: int,
-        height: int,
-        analysis: PipelineResult,
-    ):
-        maximum = self.session.mvp.maximum
-        maximum_text = "—"
-        if maximum is not None:
-            maximum_text = f"{maximum.score:.2f} на #{maximum.frame_index}"
-
-        self.stats_label.setText(
-            f"Сессия: кадров {self.generated_count} | "
-            f"Размер {width}×{height} | "
-            f"MVP avg {self.session.mvp.average:.2f} | "
-            f"MVP max {maximum_text} | "
-            f"Сохранено {self.session.saved}"
+        self.summary_label.setText(
+            f"Всего кадров: {frames:,} | суммарно: {fps:,.0f} кадр/с | "
+            f"MVP прошло: {passed:,} | сохранено: {saved:,} | "
+            f"Robust запусков: {robust_runs:,} | "
+            f"Robust прошло: {robust_candidates:,}"
         )
 
-        robust_text = "пропущен"
-        if analysis.robust is not None:
-            robust_text = (
-                f"{analysis.robust.score:.1f}/{analysis.robust.threshold:.1f}"
-            )
-
-        passed_marker = " | MVP ПРОШЁЛ" if analysis.mvp.is_interesting else ""
-        self.analysis_label.setText(
-            f"MVP: {analysis.mvp.score:.2f}/{analysis.mvp.threshold:.1f} | "
-            f"Robust: {robust_text} | "
-            f"MVP прошло: {self.session.mvp_passed} | "
-            f"Robust запусков: {self.session.robust_runs} | "
-            f"Robust кандидатов: {self.session.robust_candidates}"
-            f"{passed_marker}"
-        )
-
-        top_text = ", ".join(
-            f"{item.score:.2f} (#{item.frame_index})"
-            for item in self.session.mvp.top
-        )
-        self.top_label.setText(f"Top-10 MVP: {top_text or '—'}")
-
-    def show_current_image(self):
-        if self.current_image is None:
+    def save_lane_image(self, worker_id: int) -> None:
+        lane = self.lanes.get(worker_id)
+        if lane is None or lane.current_image is None:
             return
 
-        pixmap = QPixmap.fromImage(self.current_image)
-        scaled = pixmap.scaled(
-            self.image_label.size(),
-            Qt.KeepAspectRatio,
-            Qt.FastTransformation,
-        )
-        self.image_label.setPixmap(scaled)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.render_checkbox.isChecked():
-            self.show_current_image()
-
-    def save_current_image(self):
-        if self.current_image is None:
-            return
-
-        default_name = (
-            f"random_{self.current_image.width()}x"
-            f"{self.current_image.height()}_{self.generated_count}.png"
-        )
+        snapshot = self.latest.get(worker_id)
+        frame = snapshot.frame_index if snapshot is not None else 0
+        default_name = f"worker_{worker_id:02d}_frame_{frame:09d}.png"
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Сохранить изображение",
+            f"Сохранить кадр параллели #{worker_id}",
             str(Path.cwd() / default_name),
             "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp)",
         )
-
-        if not file_path:
-            return
-
-        if not self.current_image.save(file_path):
+        if file_path and not lane.current_image.save(file_path):
             QMessageBox.critical(
                 self,
                 "Ошибка",
                 "Не удалось сохранить изображение.",
             )
 
+    def closeEvent(self, event) -> None:
+        if self.manager is not None:
+            self.poll_timer.stop()
+            self.manager.stop_all()
+            self.manager = None
+        event.accept()
 
-def main():
+
+def main() -> None:
+    mp.freeze_support()
     app = QApplication(sys.argv)
     window = RandomImageGenerator()
     window.show()
