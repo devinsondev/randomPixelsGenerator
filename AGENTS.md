@@ -124,8 +124,10 @@ only on anomalous candidates, and reserve any future VLM calls for the tiny tail
 - Every generated frame must have a deterministic frame_seed derived from the
   persisted worker_seed and frame_id. Do not change the derivation algorithm
   silently; treat it as experiment format.
-- Every analyzed frame must be logged to the worker SQLite database. Candidate
-  images are a convenience subset, never the source of truth for statistics.
+- When SQLite logging is enabled, every analyzed frame must be logged to the
+  worker database. When the user explicitly disables SQLite, do not perform
+  hidden disk logging; in-memory statistics remain authoritative for that run
+  segment. Candidate images are a convenience subset, not a full frame journal.
 - Keep one SQLite database per worker and batch writes. Do not make 16 workers
   contend on one SQLite writer.
 - Candidate PNG files require JSON sidecars containing seeds, frame_id, dimensions,
@@ -140,3 +142,7 @@ only on anomalous candidates, and reserve any future VLM calls for the tiny tail
   path when the SQLite journal already contains the data.
 - Runtime errors that disable SQLite logging must be visible in the worker UI;
   never silently continue while claiming the experiment is fully recorded.
+
+
+- SQLite logging may be toggled at runtime. Closing it must flush pending rows;
+  re-enabling must reopen the same worker database without renumbering frame_id.
