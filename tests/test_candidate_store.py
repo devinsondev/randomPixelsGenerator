@@ -43,6 +43,8 @@ class CandidateStoreTests(unittest.TestCase):
                 worker_seed=111,
                 frame_seed=222,
                 analysis=analysis(21.5, 31.0),
+                threshold_mode="auto",
+                top_percent=0.01,
             )
 
             self.assertTrue(saved.mvp_png.exists())
@@ -56,6 +58,8 @@ class CandidateStoreTests(unittest.TestCase):
             self.assertEqual(payload["frame_id"], 42)
             self.assertEqual(payload["mvp"]["metrics"]["correlation"], 0.25)
             self.assertEqual(payload["robust"]["metrics"]["edge"], 0.75)
+            self.assertEqual(payload["threshold_policy"]["mode"], "auto")
+            self.assertEqual(payload["threshold_policy"]["top_percent"], 0.01)
             self.assertEqual(len(payload["pixel_sha256"]), 64)
 
     def test_robust_folder_is_only_for_robust_passes(self) -> None:
@@ -69,6 +73,8 @@ class CandidateStoreTests(unittest.TestCase):
                 worker_seed=1,
                 frame_seed=2,
                 analysis=analysis(20.0, 10.0),
+                threshold_mode="fixed",
+                top_percent=0.01,
             )
 
             self.assertTrue(saved.mvp_png.exists())
@@ -86,6 +92,8 @@ class CandidateStoreTests(unittest.TestCase):
                     worker_seed=1,
                     frame_seed=2,
                     analysis=analysis(3.0, None),
+                    threshold_mode="fixed",
+                    top_percent=0.01,
                 )
 
 
