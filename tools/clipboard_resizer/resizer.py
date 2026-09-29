@@ -32,11 +32,11 @@ def resize_image(
 
     transform = (
         Qt.FastTransformation
-        if resize_filter is ResizeFilter.NEAREST
+        if resize_filter == ResizeFilter.NEAREST
         else Qt.SmoothTransformation
     )
 
-    if mode is ResizeMode.STRETCH:
+    if mode == ResizeMode.STRETCH:
         return image.scaled(
             width,
             height,
@@ -46,7 +46,7 @@ def resize_image(
 
     aspect_mode = (
         Qt.KeepAspectRatio
-        if mode is ResizeMode.FIT
+        if mode == ResizeMode.FIT
         else Qt.KeepAspectRatioByExpanding
     )
     scaled = image.scaled(
@@ -56,7 +56,7 @@ def resize_image(
         transform,
     )
 
-    if mode is ResizeMode.COVER:
+    if mode == ResizeMode.COVER:
         x = max(0, (scaled.width() - width) // 2)
         y = max(0, (scaled.height() - height) // 2)
         return scaled.copy(x, y, width, height)
