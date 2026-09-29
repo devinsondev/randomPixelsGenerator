@@ -50,13 +50,17 @@ class ResultTable(QTableWidget):
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
 
+        self.setSortingEnabled(False)
+
+    def begin_batch(self) -> None:
+        self.setSortingEnabled(False)
+        self.setRowCount(0)
+
+    def end_batch(self) -> None:
         self.setSortingEnabled(True)
         self.sortByColumn(4, Qt.DescendingOrder)
 
     def add_result(self, result: BatchResult, root: Path) -> None:
-        sorting = self.isSortingEnabled()
-        self.setSortingEnabled(False)
-
         row = self.rowCount()
         self.insertRow(row)
 
@@ -100,12 +104,6 @@ class ResultTable(QTableWidget):
                 _score_item(score.robust, score.robust_passed),
             )
 
-        self.setSortingEnabled(sorting)
-
-    def clear_results(self) -> None:
-        self.setSortingEnabled(False)
-        self.setRowCount(0)
-        self.setSortingEnabled(True)
 
 
 def _score_item(score: float, passed: bool) -> NumericItem:
