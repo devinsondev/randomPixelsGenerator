@@ -158,13 +158,19 @@ class ControlPanel(QWidget):
             self.warmup_spin,
         )
         for widget in settings:
-            widget.valueChanged.connect(self.config_changed.emit)
+            widget.valueChanged.connect(
+                lambda _value: self.config_changed.emit()
+            )
 
         self.auto_threshold_checkbox.toggled.connect(
-            self.config_changed.emit
+            lambda _checked: self.config_changed.emit()
         )
-        self.render_checkbox.toggled.connect(self.config_changed.emit)
-        self.auto_save_checkbox.toggled.connect(self.config_changed.emit)
+        self.render_checkbox.toggled.connect(
+            lambda _checked: self.config_changed.emit()
+        )
+        self.auto_save_checkbox.toggled.connect(
+            lambda _checked: self.config_changed.emit()
+        )
 
         self.start_button.clicked.connect(self.start_requested.emit)
         self.stop_button.clicked.connect(self.stop_requested.emit)
