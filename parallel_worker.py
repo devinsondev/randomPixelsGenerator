@@ -195,7 +195,7 @@ def _apply_sqlite_setting(
     )
 
 
-def _close_logger(logger: FrameLogger | None) -> None:
+def _close_logger(logger: FrameLogger | None) -> FrameLogger | None:
     if logger is None:
         return None
 
