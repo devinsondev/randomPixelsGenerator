@@ -26,5 +26,10 @@ jobs:
       - name: Compile
         run: python -m compileall .
 
+      - name: Import application modules
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c "import main, control_panel, lane_widget, process_manager, parallel_worker"
+
       - name: Unit tests
         run: python -m unittest discover -s tests -v
